@@ -1,0 +1,330 @@
+library(dplyr)
+library(tidyr)
+library(readxl)
+data_SGBA <- read_excel("~.xlsx")
+#--------------------------------------------------------------------------------------------
+#change data_SGBA from wide format to long
+data_SGBA_brands <- data_SGBA[,1:51]
+data_SGBA_category <- data_SGBA[,c(1,52:101)]
+data_SGBA_unilever <- data_SGBA[,c(1,102:151)]
+data_SGBA_retailer <- data_SGBA[,c(1,152:201)]
+data_SGBA_data_SGBA <- data_SGBA[,c(1,202:251)]
+data_SGBA_promo <- data_SGBA[,c(1,252:301)]
+data_SGBA_value <- data_SGBA[,c(1,302:351)]
+data_SGBA_volume <- data_SGBA[,c(1,352:401)]
+data_SGBA_units <- data_SGBA[,c(1,402:451)]
+
+data_SGBA_brands2 <- gather(data_SGBA_brands, key="purchase_number", value="brand", 2:51, na.rm=TRUE)
+data_SGBA_category2 <- gather(data_SGBA_category, key="purchase_number", value="category", 2:51, na.rm=TRUE)
+data_SGBA_unilever2 <- gather(data_SGBA_unilever, key="purchase_number", value="unilever", 2:51, na.rm=TRUE)
+data_SGBA_retailer2 <- gather(data_SGBA_retailer, key="purchase_number", value="retailer", 2:51, na.rm=TRUE)
+data_SGBA_date2 <- gather(data_SGBA_data_SGBA, key="purchase_number", value="date", 2:51, na.rm=TRUE)
+data_SGBA_promo2 <- gather(data_SGBA_promo, key="purchase_number", value="promo", 2:51, na.rm=TRUE)
+data_SGBA_value2 <- gather(data_SGBA_value, key="purchase_number", value="value", 2:51, na.rm=TRUE)
+data_SGBA_volume2 <- gather(data_SGBA_volume, key="purchase_number", value="volume", 2:51, na.rm=TRUE)
+data_SGBA_units2 <- gather(data_SGBA_units, key="purchase_number", value="units", 2:51, na.rm=TRUE)
+
+data_SGBA_category2 <- data_SGBA_category2[,3]
+data_SGBA_unilever2 <- data_SGBA_unilever2[,3]
+data_SGBA_retailer2 <- data_SGBA_retailer2[,3]
+data_SGBA_date2 <- data_SGBA_date2[,3]
+data_SGBA_promo2 <- data_SGBA_promo2[,3]
+data_SGBA_value2 <- data_SGBA_value2[,3]
+data_SGBA_volume2 <- data_SGBA_volume2[,3]
+data_SGBA_units2 <- data_SGBA_units2[,3]
+
+data_longSGBA <- cbind(data_SGBA_brands2, data_SGBA_category2, data_SGBA_unilever2, data_SGBA_retailer2, data_SGBA_date2, data_SGBA_promo2,
+                   data_SGBA_value2, data_SGBA_volume2, data_SGBA_units2)
+
+#remove all irrelevant objects
+rm(data_SGBA_brands2, data_SGBA_category2, data_SGBA_unilever2, data_SGBA_retailer2, data_SGBA_date2, data_SGBA_promo2,
+   data_SGBA_value2, data_SGBA_volume2, data_SGBA_units2)
+
+#remove all irrelevant objects
+rm(data_SGBA_brands, data_SGBA_category, data_SGBA_unilever, data_SGBA_retailer, data_SGBA_promo, data_SGBA_value, data_SGBA_volume, data_SGBA_units,
+   data_SGBA_data_SGBA)
+#------------------------------------------------------------------------------------------
+
+#make new variable year
+data_longSGBA$year <- substring(data_longSGBA$date,1,4)
+#Add seasons to the data
+data_longSGBA$season <- substring(data_longSGBA$date,6,7)
+data_longSGBA$season=plyr::mapvalues(data_longSGBA$season,c("12","01","02","03","04","05","06","07","08","09","10","11"),c(rep("Winter",3),rep("Spring",3),rep("Summer",3),rep("Fall",3)))
+#Make NB_Rest split for UL and not UL
+data_longSGBA$brand[data_longSGBA$brand=="NB_Rest" & data_longSGBA$unilever==1]="NB_Rest_UL"
+data_longSGBA$brand[data_longSGBA$brand=="NB_Rest" & data_longSGBA$unilever==0]="NB_Rest_CP"
+
+#Delete the bath_additives dataset
+data_longSGBA=data_longSGBA[!(data_longSGBA$category=="Salts"),]
+data_longSGBA=data_longSGBA[!(data_longSGBA$category=="Cubes"),]
+
+#To replace strange values
+data_longSGBA$volume[data_longSGBA$volume=="8"]=250
+data_longSGBA$volume[data_longSGBA$volume=="16"]=500
+data_longSGBA$volume[data_longSGBA$volume=="24"]=750
+data_longSGBA$volume[data_longSGBA$volume=="32"]=1000
+data_longSGBA$volume[data_longSGBA$volume=="48"]=1500
+
+#Delete prices with 0
+data_longSGBA=data_longSGBA[!(data_longSGBA$value==0),]
+
+average_price <- data_longSGBA %>%
+  filter(value > 0 & year == "2017") %>%
+  group_by(brand) %>%
+  summarise(a = sum(value), b = sum(volume)) %>%
+  transmute(brand, avgP = a / b) %>%
+  mutate(api =  avgP/((sum(data_longSGBA$value)/sum(data_longSGBA$volume)))*100)
+
+#Make prices equal in both years
+Prices <- data_longSGBA %>%
+  summarise(
+    Average.price.2015= sum(value[year=="2015"])/sum(volume[year=="2015"]),
+    Average.price.2017= sum(value[year=="2017"])/sum(volume[year=="2017"])
+  )
+#Here the difference is shown between 2015 and 2017, 2015 has an higher average price.
+percentual.difference=Prices[[1]]/Prices[[2]]
+
+data_longSGBA$value[data_longSGBA$year=="2017"]=data_longSGBA$value[data_longSGBA$year=="2017"]* percentual.difference
+
+#Now we are making the prices equal
+Prices.equal <- data_longSGBA %>%
+  summarise(
+    Average.price.2015= sum(value[year=="2015"])/sum(volume[year=="2015"])*100,
+    Average.price.2017= sum(value[year=="2017"])/sum(volume[year=="2017"])*100
+  )
+
+#Now the value per unit is calculated and put in a new column
+data_longSGBA$value.volume = data_longSGBA$value/data_longSGBA$volume*mean(data_longSGBA$volume/data_longSGBA$units)
+data_longSGBA$value.volume[data_longSGBA$value.volume > 3000]=3000
+data_longSGBA$value.volume[data_longSGBA$value.volume < 7]=mean(data_longSGBA$value.volume)
+
+data_longSGBA <- data_longSGBA %>%
+  mutate(retailertype = ifelse(retailer == "99p Stores" | retailer == "Home Bargains" | retailer == "Other Bargain Stores" | retailer == "Poundland" | retailer == "Poundstretcher" | retailer == "Poundworld" | retailer == "B&M Bargains", "Bargain",
+                        ifelse(retailer == "Nisa Today" | retailer == "Other Grocer/Cornerstore"| retailer == "Asda" | retailer == "Budgens" | 
+                                 retailer == "Cash And Carry"| retailer == "Costco" | retailer == "Costcutter" |
+                                 retailer == "Iceland"| retailer == "Londis" | retailer == "Morrisons" |
+                                 retailer == "One Stop"| retailer == "Premier Stores" | retailer == "Sainsbury's (Supermarket)" | 
+                                 retailer == "Sainsbury's Other"| retailer == "Spar / Spar Eight Till Late" | retailer == "Tesco (Supermarket)" |
+                                 retailer == "Tesco Metro"| retailer == "Total Co-Op Grocers" | retailer == "Waitrose", "Supermarket", 
+                        ifelse(retailer == "Aldi" | retailer == "Lidl", "Discount Supermarket",
+                        ifelse(retailer == "Asda Internet" | retailer == "Marks & Spencer Internet" | retailer == "Ocado Internet" |
+                                 retailer == "Sainsbury's Internet" | retailer == "Tesco Internet" | retailer == "Waitrose Internet", "Internet",
+                        ifelse(retailer == "Homebase" | retailer == "Marks & Spencer" | retailer == "Other Department Store" |
+                                 retailer == "Wilkinson", "Household/Department Store",
+                        ifelse(retailer == "Avon" | retailer == "Bodycare/Grahams" | retailer == "Bodyshop" | retailer == "Boots" |
+                              retailer == "Co-Op Chemist" | retailer == "Holland And Barrett" | retailer == "Lloyds Chemist" | 
+                                retailer == "Other Chemist" | retailer == "Other Discount Drugstore" | retailer == "Other Health Shop" |
+                                retailer == "Other Health Shop" | retailer == "Superdrug", "health/beauty store", "Other")))))))
+         
+
+
+#rm redundant variables
+rm(average_price)
+rm(Prices)
+rm(Prices.equal)
+#######
+
+modeldata_SGBA <- data_longSGBA %>%
+  group_by(panelist) %>%
+  summarise(value.15_SGBA     = mean(value.volume[year == "2015"]),
+            value.17_SGBA      = mean(value.volume[year == "2017"]),
+            promotion_SGBA   = sum(volume[year == "2015"& promo=="1"])/sum(volume[year == "2015"]),
+            
+            avg_volume_SGBA  = mean(volume[year == "2015"]/units[year == "2015"]),
+            
+            Body.Wash = sum(volume[year == "2015" & category== "Body Wash"]) /sum(volume[year == "2015"]),
+            Liquid     = sum(volume[year == "2015" & category== "Liquid"] ) /sum(volume[year == "2015"]),
+            Shower.Products      = sum(volume[year == "2015" & category== "Shower Products"]) /sum(volume[year == "2015"]),
+            
+            Winter = sum(volume[year == "2015" & season== "Winter"]) /sum(volume[year == "2015"]),
+            Spring  = sum(volume[year == "2015" & season== "Spring"]) /sum(volume[year == "2015"]),
+            Summer   = sum(volume[year == "2015" & season== "Summer"]) /sum(volume[year == "2015"]),
+            Fall    = sum(volume[year == "2015" & season== "Fall"]) /sum(volume[year == "2015"]),
+            
+            NB1_SGBA_UL  = sum(volume[year == "2015" & brand=="NB1"]) /sum(volume[year == "2015"]),
+            NB2_SGBA  = sum(volume[year == "2015" & brand=="NB2"]) /sum(volume[year == "2015"]),
+            NB3_SGBA_UL  = sum(volume[year == "2015" & brand=="NB3"]) /sum(volume[year == "2015"]),
+            NB4_SGBA  = sum(volume[year == "2015" & brand=="NB4"]) /sum(volume[year == "2015"]),
+            NB5_SGBA_UL  = sum(volume[year == "2015" & brand=="NB5"]) /sum(volume[year == "2015"]),
+            NB6_SGBA  = sum(volume[year == "2015" & brand=="NB6"]) /sum(volume[year == "2015"]),
+            NB7_SGBA  = sum(volume[year == "2015" & brand=="NB7"]) /sum(volume[year == "2015"]),
+            NB8_SGBA  = sum(volume[year == "2015" & brand=="NB8"]) /sum(volume[year == "2015"]),
+            NB9_SGBA_UL = sum(volume[year == "2015" & brand=="NB9"]) /sum(volume[year == "2015"]),
+            NB10_SGBA = sum(volume[year == "2015" & brand=="NB10"]) /sum(volume[year == "2015"]),
+            NB_Rest_SGBA_UL = sum(volume[year == "2015" & brand=="NB_Rest_UL"]) /sum(volume[year == "2015"]),
+            NB_Rest_SGBA_CP = sum(volume[year == "2015" & brand=="NB_Rest_CP"]) /sum(volume[year == "2015"]),
+            PL_SGBA = sum(volume[year == "2015" & brand=="PL"]) /sum(volume[year == "2015"]),
+            
+            retailer_other =  sum(volume[year == "2015" & retailertype == "Other"]) /sum(volume[year == "2015"]),
+            internet =  sum(volume[year == "2015" & retailertype == "Internet"]) /sum(volume[year == "2015"]),
+            beautystore =  sum(volume[year == "2015" & retailertype == "health/beauty store"]) /sum(volume[year == "2015"]),
+            hhold_department =  sum(volume[year == "2015" & retailertype == "Household/Department Store"]) /sum(volume[year == "2015"]),
+            supermarket =  sum(volume[year == "2015" & retailertype == "Supermarket"]) /sum(volume[year == "2015"]),
+            bargain =  sum(volume[year == "2015" & retailertype == "Bargain"]) /sum(volume[year == "2015"]),
+            discount_supermarket =  sum(volume[year == "2015" & retailertype == "Discount Supermarket"])/sum(volume[year == "2015"])
+            
+  )
+
+
+#To remove the panelist that have been lost
+Panelist_remove_SGBA=setdiff(data_SGBA$panelist,modeldata_SGBA$panelist)
+for(i in c(1:length(Panelist_remove_SGBA))){
+  data_SGBA=data_SGBA[!data_SGBA$panelist==Panelist_remove_SGBA[[i]],]}
+
+#sort panelists to have original order back
+modeldata_SGBA$panelist <- sort(modeldata_SGBA$panelist)
+
+
+#add age/social class/household size/>50 purchases to model
+modeldata_SGBA$age_SGBA <- data_SGBA$Age
+modeldata_SGBA$hhsize_SGBA <- data_SGBA$Household_size
+modeldata_SGBA$socialclass_SGBA <- data_SGBA$Social_class
+modeldata_SGBA$fifty_plus_SGBA <- data_SGBA$More_than_50_Purchases
+
+#To delete 1 for every dummy, otherwise the linear modle will return errors.  
+modeldata_SGBA=modeldata_SGBA 
+modeldata_SGBA$panelist=NULL
+
+#The model as suggested by the proffessor
+#Create difference between 17 and 15
+modeldata_SGBA$difference_SGBA=modeldata_SGBA$value.17_SGBA- modeldata_SGBA$value.15_SGBA
+modeldata_SGBA$value.17_SGBA=NULL
+
+
+#Normalize the variables
+modeldata_SGBA$value.15_SGBA=modeldata_SGBA$value.15_SGBA/head(sort(modeldata_SGBA$value.15_SGBA, decreasing = TRUE),1)
+modeldata_SGBA$age_SGBA=modeldata_SGBA$age_SGBA/head(sort(modeldata_SGBA$age_SGBA, decreasing = TRUE),1)
+modeldata_SGBA$hhsize_SGBA=modeldata_SGBA$hhsize_SGBA/head(sort(modeldata_SGBA$hhsize_SGBA, decreasing = TRUE),1)
+modeldata_SGBA$avg_volume_SGBA=modeldata_SGBA$avg_volume_SGBA/head(sort(modeldata_SGBA$avg_volume_SGBA, decreasing = TRUE),1)
+
+#table(is.na(modeldata_SGBA$difference)) #of 16906 the difference between 2017 and 2015 could be calculated in average api
+modeldata_SGBA$socialclass_SGBA=as.factor(as.character(modeldata_SGBA$socialclass_SGBA))
+
+
+#Normalize the variables
+modeldata_SGBA$value.15_SGBA=modeldata_SGBA$value.15_SGBA/head(sort(modeldata_SGBA$value.15_SGBA, decreasing = TRUE),1)
+modeldata_SGBA$age_SGBA=modeldata_SGBA$age_SGBA/head(sort(modeldata_SGBA$age_SGBA, decreasing = TRUE),1)
+modeldata_SGBA$hhsize_SGBA=modeldata_SGBA$hhsize_SGBA/head(sort(modeldata_SGBA$hhsize_SGBA, decreasing = TRUE),1)
+modeldata_SGBA$avg_volume_SGBA=modeldata_SGBA$avg_volume_SGBA/head(sort(modeldata_SGBA$avg_volume_SGBA, decreasing = TRUE),1)
+
+
+#table(is.na(modeldata_SGBA$difference)) #of 16906 the difference between 2017 and 2015 could be calculated in average api
+modeldata_SGBA$socialclass_SGBA=as.factor(as.character(modeldata_SGBA$socialclass_SGBA))
+#+promotion + unilever + aerosol + sticks + wipes + cream + gel + age + hhsize+promotion * age   +fifty_plus +socialclass
+modeldata_SGBA=modeldata_SGBA[complete.cases(modeldata_SGBA),]
+
+a = as.matrix(summary(modeldata_SGBA))
+
+draft.model_SGBA=lm(difference_SGBA~.-PL_SGBA-Shower.Products-Winter-supermarket, data=modeldata_SGBA,na.action=na.omit)
+
+summary(draft.model_SGBA)
+plot(draft.model_SGBA)
+
+
+#MFA
+library(caret)
+str(modeldata_SGBA)
+normalizing = function(x){
+  num = x-min(x)
+  den = max(x) - min(x)
+  return(num/den)
+}
+modeldata_SGBA$difference_SGBA = normalizing(modeldata_SGBA$difference_SGBA)
+modeldata_SGBA$socialclass_SGBA = normalizing(as.numeric(modeldata_SGBA$socialclass_SGBA))
+
+colnames(modeldata_SGBA) = c("value15","promo", "avevolume",
+                             "bodywash","liquid","showerproducts",
+                             "WT","SP","SM","FL",
+                             "1UL","2","3UL","4","5UL","6","7","8","9UL","10","restUL","restCP","PL",
+                             "otherretailer","internet","beauty","hhold","supermarket","bargin","discounted",
+                             "age","hhsize","socialclass","fiftyplus","difference")
+
+modeldata_SGBA <- modeldata_SGBA[, c((1:32), 35, 34, 33)]
+modeldata_SGBA$fiftyplus = as.factor(modeldata_SGBA$fiftyplus)
+modeldata_SGBA$socialclass = as.factor(modeldata_SGBA$socialclass)
+library(FactoMineR)
+
+MFA = MFA(base=modeldata_SGBA, group = c(1,1,1,3,4,13,7,1,1,1,1,1), 
+          type=c(rep("s",10),rep("n",2)), ncp=11,
+          name.group = c("value15","promo", "avevolume","category","season",
+                         "brand","retailer","age","hhsize","difference","socialclass","fiftyplus"),
+          num.group.sup = c(10),
+          axes = c(3,4)
+)
+summary(MFA)
+library(randomForest)
+library(pdp)
+
+#random forest model
+normalizing = function(x){
+  num = x-min(x)
+  den = max(x) - min(x)
+  return(num/den)
+}
+
+modeldata_SGBA$age_SGBA= normalizing(modeldata_SGBA$age_SGBA)
+
+colnames(modeldata_SGBA) = c("value.15","promotion", "ave_volume",
+                             "body.wash","Liquid","Showerproducts",
+                             "Winter","Spring","Summer","Fall",
+                             "NB1_ul_vfm","NB2_cp_vfm","NB3_ul_premium","NB4_cp_mass","NB5_ul_premium","NB6_cp_mass","NB7_cp_mass","NB8_cp_mass","NB9_ul_mass","NB10_cp_mass","NB_Rest_ul_premium","NB_Rest_cp_premium","PL_cp_vfm",
+                             "otherretailer","internet","beauty","hhold_department","supermarket","bargin","discounted_supermarket",
+                             "age","hhsize","socialclass","fifty_plus","difference")
+rf.Aprice <- randomForest(
+  formula         = difference ~ .,
+  data            = modeldata_SGBA,
+  importance      = TRUE
+)
+summary(modeldata_SGBA)
+
+plot(rf.Aprice)
+abline(v = which.min(rf.Aprice$mse), lty = 2, col = "red")
+varImpPlot(rf.Aprice)
+
+pdp1 <- partial(rf.Aprice, pred.var = "value.15", plot = TRUE)
+pdp2 <- partial(rf.Aprice, pred.var = "ave_volume", plot = TRUE)
+pdp3 <- partial(rf.Aprice, pred.var = "age", plot = TRUE)
+pdp4 <- partial(rf.Aprice, pred.var = "socialclass", plot = TRUE)
+pdp5 <- partial(rf.Aprice, pred.var = "beauty", plot = TRUE)
+pdp6 <- partial(rf.Aprice, pred.var = "NB_Rest_cp_premium", plot = TRUE)
+pdp7 <- partial(rf.Aprice, pred.var = "Summer", plot = TRUE)
+pdp8 <- partial(rf.Aprice, pred.var = "Fall", plot = TRUE)
+pdp9 <- partial(rf.Aprice, pred.var = "Winter", plot = TRUE)
+pdp10 <- partial(rf.Aprice, pred.var = "Showerproducts", plot = TRUE)
+pdp11 <- partial(rf.Aprice, pred.var = "Liquid", plot = TRUE)
+pdp12 <- partial(rf.Aprice, pred.var = "hhsize", plot = TRUE)
+pdp13 <- partial(rf.Aprice, pred.var = "Spring", plot = TRUE)
+pdp14 <- partial(rf.Aprice, pred.var = "body.wash", plot = TRUE)
+pdp15 <- partial(rf.Aprice, pred.var = "discounted_supermarket", plot = TRUE)
+pdp16 <- partial(rf.Aprice, pred.var = "NB", plot = TRUE)
+
+
+grid.arrange(pdp1, pdp2, pdp3, pdp4, pdp5, pdp6, ncol = 3)
+grid.arrange(pdp7, pdp8, pdp9, pdp10, pdp11, pdp12, ncol = 3)
+grid.arrange(pdp13, pdp14, pdp15, ncol = 3)
+
+
+
+library(ranger)
+rf.Aprice <- ranger(
+  formula         = difference ~ .,
+  data            = modeldata_SGBA,
+  importance      = 'impurity'
+)
+plot(rf.Aprice$variable.importance)
+plot(rf.Aprice)
+a = as.data.frame(rf.Aprice$variable.importance)
+
+abline(v = which.min(rf.Aprice$mse), lty = 2, col = "red")
+varImpPlot(rf.Aprice)
+
+summary(modeldata_SGBA)
+
+Loyalty.occ=Loyalty[1,]
+for(i in 2:14){
+  Loyalty[,i]=Loyalty[,i]*Loyalty[,15]
+  Loyalty1=Loyalty[,c(i,15)]
+  Loyalty1=Loyalty1[complete.cases(Loyalty1),]
+  Loyalty.occ[i]=sum(Loyalty1[,1])/sum(Loyalty1[,2])
+}
+Loyalty.occ=Loyalty.occ[,-c(1,15)]
