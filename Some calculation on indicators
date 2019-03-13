@@ -1,0 +1,268 @@
+library(dplyr)
+library(tidyr)
+
+#change format from .xlsx to .csv first, then you can load it in like this
+#data <- read.csv("C:/Users/binal/Documents/Master/Case Study Seminar/data/Deodorants.csv", na.strings = "")
+
+library(readxl)
+data <- read_excel("C:/Users/Cher/Desktop/Shower Gel and Bath Additives - UK.xlsx")
+#brands: 2-51
+#category: 52-101
+#unilever: 102-151
+#retailer: 152-201
+#date: 202-251
+#promo: 252-301
+#value: 302-351
+#volume: 352-401
+#units: 402-451
+#>50 purchases: 452
+#Age: 453
+#Household size: 454
+#social class: 455
+#--------------------------------------------------------------------------------------------
+#change data from wide format to long
+data_brands <- data[,1:51]
+data_category <- data[,c(1,52:101)]
+data_unilever <- data[,c(1,102:151)]
+data_retailer <- data[,c(1,152:201)]
+data_data <- data[,c(1,202:251)]
+data_promo <- data[,c(1,252:301)]
+data_value <- data[,c(1,302:351)]
+data_volume <- data[,c(1,352:401)]
+data_units <- data[,c(1,402:451)]
+
+data_brands2 <- gather(data_brands, key="purchase_number", value="brand", 2:51, na.rm=TRUE)
+data_category2 <- gather(data_category, key="purchase_number", value="category", 2:51, na.rm=TRUE)
+data_unilever2 <- gather(data_unilever, key="purchase_number", value="unilever", 2:51, na.rm=TRUE)
+data_retailer2 <- gather(data_retailer, key="purchase_number", value="retailer", 2:51, na.rm=TRUE)
+data_date2 <- gather(data_data, key="purchase_number", value="date", 2:51, na.rm=TRUE)
+data_promo2 <- gather(data_promo, key="purchase_number", value="promo", 2:51, na.rm=TRUE)
+data_value2 <- gather(data_value, key="purchase_number", value="value", 2:51, na.rm=TRUE)
+data_volume2 <- gather(data_volume, key="purchase_number", value="volume", 2:51, na.rm=TRUE)
+data_units2 <- gather(data_units, key="purchase_number", value="units", 2:51, na.rm=TRUE)
+
+data_category2 <- data_category2[,3]
+data_unilever2 <- data_unilever2[,3]
+data_retailer2 <- data_retailer2[,3]
+data_date2 <- data_date2[,3]
+data_promo2 <- data_promo2[,3]
+data_value2 <- data_value2[,3]
+data_volume2 <- data_volume2[,3]
+data_units2 <- data_units2[,3]
+
+data_long <- cbind(data_brands2, data_category2, data_unilever2, data_retailer2, data_date2, data_promo2,
+                   data_value2, data_volume2, data_units2)
+
+#make new variable year
+data_long$year <- substring(data_long$date,1,4)
+#Add seasons to the data
+data_long$season <- substring(data_long$date,6,7)
+data_long$season=plyr::mapvalues(data_long$season,c("12","01","02","03","04","05","06","07","08","09","10","11"),c(rep("Winter",3),rep("Spring",3),rep("Summer",3),rep("Fall",3)))
+#Make NB_Rest split for UL and not UL
+data_long$brand[data_long$brand=="NB_Rest" & data_long$unilever==1]="NB_Rest_UL"
+data_long$brand[data_long$brand=="NB_Rest" & data_long$unilever==0]="NB_Rest_CP"
+
+#Delete the bath_additives dataset
+data_long=data_long[!(data_long$category=="Salts"),]
+data_long=data_long[!(data_long$category=="Cubes"),]
+
+#To replace strange values
+data_long$volume[data_long$volume=="8"]=250
+data_long$volume[data_long$volume=="16"]=500
+data_long$volume[data_long$volume=="24"]=750
+data_long$volume[data_long$volume=="32"]=1000
+data_long$volume[data_long$volume=="48"]=1500
+
+#Delete prices with 0
+data_long=data_long[!(data_long$value==0),]
+
+average_price <- data_long %>%
+  filter(value > 0 & year == "2017") %>%
+  group_by(brand) %>%
+  summarise(a = sum(value), b = sum(volume)) %>%
+  transmute(brand, avgP = a / b) %>%
+  mutate(api =  avgP/((sum(data_long$value)/sum(data_long$volume)))*100)
+
+#Make prices equal in both years
+Prices <- data_long %>%
+  summarise(
+    Average.price.2015= sum(value[year=="2015"])/sum(volume[year=="2015"]),
+    Average.price.2017= sum(value[year=="2017"])/sum(volume[year=="2017"])
+  )
+#Here the difference is shown between 2015 and 2017, 2015 has an higher average price.
+percentual.difference=Prices[[1]]/Prices[[2]]
+
+data_long$value[data_long$year=="2017"]=data_long$value[data_long$year=="2017"]* percentual.difference
+
+#Now we are making the prices equal
+Prices.equal <- data_long %>%
+  summarise(
+    Average.price.2015= sum(value[year=="2015"])/sum(volume[year=="2015"])*100,
+    Average.price.2017= sum(value[year=="2017"])/sum(volume[year=="2017"])*100
+  )
+
+#Now the value per unit is calculated and put in a new column
+data_long$value.volume = data_long$value/data_long$volume*mean(data_long$volume/data_long$units)
+data_long$value.volume[data_long$value.volume > 3000]=3000
+data_long$value.volume[data_long$value.volume < 7]=mean(data_long$value.volume)
+
+data_long <- data_long %>%
+  mutate(retailertype = ifelse(retailer == "99p Stores" | retailer == "Home Bargains" | retailer == "Other Bargain Stores" | retailer == "Poundland" | retailer == "Poundstretcher" | retailer == "Poundworld" | retailer == "B&M Bargains", "Bargain",
+                               ifelse(retailer == "Nisa Today" | retailer == "Other Grocer/Cornerstore"| retailer == "Asda" | retailer == "Budgens" | 
+                                        retailer == "Cash And Carry"| retailer == "Costco" | retailer == "Costcutter" |
+                                        retailer == "Iceland"| retailer == "Londis" | retailer == "Morrisons" |
+                                        retailer == "One Stop"| retailer == "Premier Stores" | retailer == "Sainsbury's (Supermarket)" | 
+                                        retailer == "Sainsbury's Other"| retailer == "Spar / Spar Eight Till Late" | retailer == "Tesco (Supermarket)" |
+                                        retailer == "Tesco Metro"| retailer == "Total Co-Op Grocers" | retailer == "Waitrose", "Supermarket", 
+                                      ifelse(retailer == "Aldi" | retailer == "Lidl", "Discount Supermarket",
+                                             ifelse(retailer == "Asda Internet" | retailer == "Marks & Spencer Internet" | retailer == "Ocado Internet" |
+                                                      retailer == "Sainsbury's Internet" | retailer == "Tesco Internet" | retailer == "Waitrose Internet", "Internet",
+                                                    ifelse(retailer == "Homebase" | retailer == "Marks & Spencer" | retailer == "Other Department Store" |
+                                                             retailer == "Wilkinson", "Household/Department Store",
+                                                           ifelse(retailer == "Avon" | retailer == "Bodycare/Grahams" | retailer == "Bodyshop" | retailer == "Boots" |
+                                                                    retailer == "Co-Op Chemist" | retailer == "Holland And Barrett" | retailer == "Lloyds Chemist" | 
+                                                                    retailer == "Other Chemist" | retailer == "Other Discount Drugstore" | retailer == "Other Health Shop" |
+                                                                    retailer == "Other Health Shop" | retailer == "Superdrug", "health/beauty store", "Other")))))))
+
+data_long=data_longSGBA
+data_long <- data_long %>%
+  mutate(brandtype = ifelse (brand == "NB3" | brand == "NB5" | brand == "NB_Rest_CP"| brand == "NB_Rest_UL", "Premium",
+                            ifelse (brand == "NB7" | brand == "NB6" | brand == "NB4"| brand == "NB8"| 
+                                      brand == "NB10"| brand == "NB9", "Mass",
+                                    ifelse (brand == "NB2" | brand == "NB1" | brand == "PL", "VFM","Other"
+                                    ))))
+
+data_long <- data_long %>%
+  mutate(NBtype = ifelse (brand == "NB3" | brand == "NB5" , "PremiumNB",
+                             ifelse (brand == "NB7" | brand == "NB6" | brand == "NB4"| brand == "NB8"| brand == "NB10"| 
+                                       brand == "NB9", "MassNB",
+                                     ifelse (brand == "NB2" | brand == "NB1" , "VFMNB","Other"
+                                     ))))
+data_long <- data_long %>%
+  mutate(PLtype = ifelse (brand == "PL" , "PL",
+                          "other"
+                                  ))
+
+data_long <- data_long %>%
+  mutate(NBresttype = ifelse (brand == "NB1" | brand == "NB2" | brand == "NB3"| brand == "NB4"| brand == "NB5"| 
+                                brand == "NB6" | brand == "NB7"| brand == "NB8"| brand == "NB9"| brand == "NB10","NB",
+                          ifelse (brand == "NB_Rest_CP"| brand == "NB_Rest_UL", "NBrest",
+                                 "Other"
+                                  )))
+
+data_long <- data_long %>%
+  mutate(marketAve = ifelse (brand == "NB1" | brand == "NB2" | brand == "NB3"| brand == "NB4"| brand == "NB5"| 
+                               brand == "NB6" | brand == "NB7"| brand == "NB8"| brand == "NB9"| brand == "NB10"| 
+                             brand == "NB_Rest_CP"| brand == "NB_Rest_UL" | brand == "PL", "market",
+                                      "Other"
+                              ))
+
+data_long <- data_long %>%
+  mutate(UL = ifelse (brand == "NB1" | brand == "NB3" | brand == "NB3"| brand == "NB4"| brand == "NB5"| 
+                                brand == "NB6" | brand == "NB7"| brand == "NB8"| brand == "NB9"| brand == "NB10","UL",
+                              ifelse (brand == "NB_Rest_CP"| brand == "NB_Rest_UL", "CP",
+                                      "Other"
+                              )))
+
+
+#-------------------------------------------------------------------------------------------------------
+#create vector containing all brands and one for all years
+brands    <- c("NB1", "NB2","NB3","NB4","NB5","NB6","NB7","NB8","NB9","NB10","NB_Rest_CP","NB_Rest_UL", "PL")
+brandtype <- c("Premium", "Mass","VMF")
+NBtype <- c("PremiumNB", "MassNB","VMFNB")
+PLtype <- c("PL", "other")
+NBresttype <- c("NB", "NBrest")
+marketAve <- c("market", "other")
+
+yr        <- c("2015","2016", "2017")
+panelists <- c(19729,19145,18719)
+
+brand_penetration <- data.frame()
+brand_penetration[1:length(PLtype),1] <- PLtype
+
+for(j in 1:length(yr)) {
+  for(i in 1:length(PLtype)) {
+    brand_penetration[i,1+j] <- data_long %>%
+      group_by(panelist) %>%
+      count(PLtype, year) %>%
+      filter(PLtype == PLtype[i], year == yr[j]) %>%
+      nrow() / panelists[j]
+  }
+}
+
+brand_penetration1 <- data_long %>%
+  group_by(panelist) %>%
+  count(brand, year) %>%
+  filter(brand == "NB1", year == 2015) %>%
+  nrow() / panelists[j]
+
+b = subset(data_long,data_long$brandtype=="VFM")
+c = subset(b,b$year==2017)
+a = n_distinct(c$panelist)
+
+
+
+
+brand_penetration[,2:4] <- round(brand_penetration[,2:4] * 100, 2) 
+
+#-------------------------------------------------------------------------------------------------
+
+#brand loyalty (occasion) for a period of 3 years
+
+
+loyalty_occasion <- data.frame()
+
+for(i in 1:length(brands)) {
+loyalty_occasion[i,1] <- brands[i]
+loyalty <- data_long %>%
+  group_by(panelist) %>%
+    count(brand, year) %>%
+      filter(panelist %in% panelist[brand == brands[i]])
+
+
+loyalty_occasion[i,2] <- sum(loyalty[loyalty$brand== brands[i],]$n) / sum(loyalty$n)
+}
+
+#brand loyalty (occasion) per year
+loyalty_occasion_yearly <- data.frame()
+loyalty_occasion_yearly[1:length(brands),1] <- brands
+
+#calulate loyalty (occasions) for 2015-2017 seperately
+for(j in 1:length(yr)) {
+  for(i in 1:length(brands)) {
+  
+    loyalty <- data_long %>%
+      group_by(panelist) %>%
+      count(brand, year) %>%
+      filter(year == yr[j]) %>%
+      filter(panelist %in% panelist[brand == brands[i]])
+    
+    loyalty_occasion_yearly[i,1+j] <- sum(loyalty[loyalty$brand == brands[i],]$n) / sum(loyalty$n)
+  }
+}
+
+
+loyalty_occasion_yearly[,2:4] <- round((loyalty_occasion_yearly[,2:3] * 100), 1)
+colnames(loyalty_occasion_yearly) <- c("Brand", "2015", "2017")
+loyalty_occasion_yearly
+
+# --------------
+loyalty_value_yearly <- data.frame()
+loyalty_value_yearly[1:length(brands),1] <- brands
+for(j in 1:length(yr)) {
+  for(i in 1:length(brands)) {
+loyalty <- data_long %>%
+  group_by(panelist) %>%
+  count(brand, year, data_value2) %>%
+  mutate(data_value2 * n) %>%
+  filter(panelist %in% panelist[brand == brands[i]])
+
+colnames(loyalty)[6] <- "sum"
+ 
+loyalty_value_yearly[i,1+j] <- sum(loyalty[loyalty$brand == brands[i],]$sum) / sum(loyalty$sum)
+  }
+}
+
+loyalty_value_yearly[,2:4] <- round((loyalty_value_yearly[,2:4] * 100), 1)
+colnames(loyalty_value_yearly) <- c("Brand", "2015", "2016", "2017")
+loyalty_value_yearly
