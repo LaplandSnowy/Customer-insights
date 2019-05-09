@@ -2,10 +2,10 @@ library(dplyr)
 library(tidyr)
 
 #change format from .xlsx to .csv first, then you can load it in like this
-#data <- read.csv("C:/Users/binal/Documents/Master/Case Study Seminar/data/Deodorants.csv", na.strings = "")
+#data <- read.csv("~.csv", na.strings = "")
 
 library(readxl)
-data <- read_excel("C:/Users/Cher/Desktop/Shower Gel and Bath Additives - UK.xlsx")
+data <- read_excel("~.xlsx")
 #brands: 2-51
 #category: 52-101
 #unilever: 102-151
